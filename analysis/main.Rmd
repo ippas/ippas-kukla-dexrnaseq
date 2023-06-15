@@ -24,19 +24,19 @@ sample_info <- tibble(
     'FCx_C21', 'FCx_C22', 'FCx_C23', 'FCx_C24', 'FCx_C25', 'FCx_C26', 'FCx_C27',
     'FCx_D21', 'FCx_D22', 'FCx_D23', 'FCx_D24', 'FCx_D25', 'FCx_D26', 'FCx_D27',
     'Hp_C21', 'Hp_C22', 'Hp_C23', 'Hp_C24', 'Hp_C25', 'Hp_C26', 'Hp_C27',
-    'Hp_D21', 'Hp_D22', 'Hp_D23', 'Hp_D24', 'Hp_D25', 'Hp_D26', 'Hp_D27' 
+    'Hp_D21', 'Hp_D22', 'Hp_D23', 'Hp_D24', 'Hp_D25', 'Hp_D26', 'Hp_D27'
   ),
   tissue = c(
     'FCx', 'FCx', 'FCx', 'FCx', 'FCx', 'FCx', 'FCx',
     'FCx', 'FCx', 'FCx', 'FCx', 'FCx', 'FCx', 'FCx',
     'Hp', 'Hp', 'Hp', 'Hp', 'Hp', 'Hp', 'Hp',
-    'Hp', 'Hp', 'Hp', 'Hp', 'Hp', 'Hp', 'Hp' 
+    'Hp', 'Hp', 'Hp', 'Hp', 'Hp', 'Hp', 'Hp'
   ),
   treatment = c(
     'C', 'C', 'C', 'C', 'C', 'C', 'C',
     'D', 'D', 'D', 'D', 'D', 'D', 'D',
     'C', 'C', 'C', 'C', 'C', 'C', 'C',
-    'D', 'D', 'D', 'D', 'D', 'D', 'D' 
+    'D', 'D', 'D', 'D', 'D', 'D', 'D'
   )
 )
 ```
@@ -100,7 +100,7 @@ hp <-
 .fcx_f <- apply(select(fcx, all_of(fcx_info$name)), 1, .tpm_fold, info = fcx_info)
 .hp_f <- apply(select(hp, all_of(hp_info$name)), 1, .tpm_fold, info = hp_info)
 
-fcx %>% 
+fcx %>%
   mutate(p = .fcx_p, fold = .fcx_f, .after = gene_name) %>%
   filter(!is.na(p)) %>%
   mutate(p.adj = p.adjust(p, method = 'fdr'), .after = p) %>% View('fcx')
