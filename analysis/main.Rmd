@@ -52,28 +52,28 @@ hp_info <-
 tpm_fcx_norm <-
   tpm %>%
   select(gene_id, gene_name, all_of(fcx_info$name)) %>%
-  # filter(rowMeans(across(all_of(fcx_info$name))) > 1) %>%
+  filter(rowMeans(across(all_of(fcx_info$name))) > 1) %>%
   select(all_of(fcx_info$name)) %>%
   as.matrix() %>%
   normalize.quantiles(keep.names = TRUE) %>%
   {{ log2(. + 1) }}
 fcx <-
   tpm %>%
-  # filter(rowMeans(across(all_of(fcx_info$name))) > 1) %>%
+  filter(rowMeans(across(all_of(fcx_info$name))) > 1) %>%
   select(gene_id, gene_name) %>%
   bind_cols(tpm_fcx_norm)
 
 tpm_hp_norm <-
   tpm %>%
   select(gene_id, gene_name, all_of(hp_info$name)) %>%
-  # filter(rowMeans(across(all_of(hp_info$name))) > 1) %>%
+  filter(rowMeans(across(all_of(hp_info$name))) > 1) %>%
   select(all_of(hp_info$name)) %>%
   as.matrix() %>%
   normalize.quantiles(keep.names = TRUE) %>%
   {{ log2(. + 1) }}
 hp <-
   tpm %>%
-  # filter(rowMeans(across(all_of(hp_info$name))) > 1) %>%
+  filter(rowMeans(across(all_of(hp_info$name))) > 1) %>%
   select(gene_id, gene_name) %>%
   bind_cols(tpm_hp_norm)
 ```
@@ -104,19 +104,10 @@ fcx %>%
   mutate(p = .fcx_p, fold = .fcx_f, .after = gene_name) %>%
   filter(!is.na(p)) %>%
   mutate(p.adj = p.adjust(p, method = 'fdr'), .after = p) %>%
-  write_csv('results/gene-tpm-FCx-full.csv')
+  write_csv('results/gene-tpm-FCx.csv')
 hp %>%
   mutate(p = .hp_p, fold = .hp_f, .after = gene_name) %>%
   filter(!is.na(p)) %>%
   mutate(p.adj = p.adjust(p, method = 'fdr'), .after = p) %>%
-  write_csv('results/gene-tpm-Hp-full.csv')
-
-full_join(
-  read_csv('results/gene-tpm-FCx-full.csv'),
-  read_csv('results/gene-tpm-Hp-full.csv'),
-  by = c('gene_id', 'gene_name'),
-  suffix = c('_fcx', '_hp')
-) %>%
-  select(gene_id, gene_name, ends_with('fcx'), ends_with('hp'), everything()) %>%
-  write_csv('results/gene-tpm-FCx-Hp-full.csv')
+  write_csv('results/gene-tpm-Hp.csv')
 ```
