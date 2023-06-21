@@ -44,13 +44,25 @@ pass <- function(x) {x}
 ```
 
 ```{r}
-for (tiss in c('FCx', 'Hp')){
-  info <- filter(sample_info, tissue == tiss)
+gene_counts <- read_tsv('data/rnaseq-out/star_salmon/salmon.merged.gene_counts.tsv')
+.to_remove <- list(
+  'FCx' = c('FCx_C25', 'FCx_D24'),
+  'Hp' = c('Hp_C25')
+)
 
-  tpm <- read_tsv('data/rnaseq-out/star_salmon/salmon.merged.gene_counts.tsv')
-  x <- tpm %>% select(all_of(info$name))
+for (tiss in c('FCx', 'Hp')){
+  sample_info_modified <-
+    sample_info %>%
+    filter(! name %in% .to_remove[[tiss]])
+  suff <- paste0(
+    c('', str_split_i(.to_remove[[tiss]], '_', 2), 'removed'),
+    collapse = '-'
+  )
+
+  tissue_info <- filter(sample_info_modified, tissue == tiss)
+  x <- gene_counts %>% select(all_of(tissue_info$name))
   groups. <-
-    info %>%
+    tissue_info %>%
     `[`(match(colnames(x), .$name), ) %>%
     pull(treatment) %>%
     factor()
@@ -66,7 +78,7 @@ for (tiss in c('FCx', 'Hp')){
   fit <- glmFit(dge_counts, design)
 
   contr <- makeContrasts(
-    dex = (groups.C - groups.D),
+    dex = (groups.D - groups.C),
     levels = design
   )
 
@@ -74,8 +86,10 @@ for (tiss in c('FCx', 'Hp')){
   topTags(results, n ='inf')$table %>%
     as_tibble(rownames = 'row_index') %>%
     mutate(
-      gene_name = tpm[as.numeric(.$row_index), ]$gene_name
+      gene_name = gene_counts[as.numeric(.$row_index), ]$gene_name,
+      .after = row_index
     ) %>%
-    write_csv(paste0('results/edger/gene-', tiss, '.csv'))
+    select(-row_index) %>%
+    write_csv(paste0('results/edger/gene-', tiss, suff, '.csv'))
 }
 ```
