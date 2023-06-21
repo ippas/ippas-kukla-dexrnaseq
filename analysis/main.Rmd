@@ -10,15 +10,16 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 # https://github.com/Bioconductor/bioconductor_docker/issues/22
 BiocManager::install("preprocessCore", configure.args="--disable-threading")
+BiocManager::install("edgeR")
 ```
 
 ```{r load_libraries}
 library(tidyverse)
 library(preprocessCore)
+library(edgeR)
 ```
 
 ```{r read_data}
-tpm <- read_tsv('data/rnaseq-out/star_salmon/salmon.merged.gene_tpm.tsv')
 sample_info <- tibble(
   name = c(
     'FCx_C21', 'FCx_C22', 'FCx_C23', 'FCx_C24', 'FCx_C25', 'FCx_C26', 'FCx_C27',
@@ -39,75 +40,42 @@ sample_info <- tibble(
     'D', 'D', 'D', 'D', 'D', 'D', 'D'
   )
 )
+pass <- function(x) {x}
 ```
 
 ```{r}
-fcx_info <-
-  sample_info %>%
-  filter(tissue == 'FCx')
-hp_info <-
-  sample_info %>%
-  filter(tissue == 'Hp')
+for (tiss in c('FCx', 'Hp')){
+  info <- filter(sample_info, tissue == tiss)
 
-tpm_fcx_norm <-
-  tpm %>%
-  select(gene_id, gene_name, all_of(fcx_info$name)) %>%
-  filter(rowMeans(across(all_of(fcx_info$name))) > 1) %>%
-  select(all_of(fcx_info$name)) %>%
-  as.matrix() %>%
-  normalize.quantiles(keep.names = TRUE) %>%
-  {{ log2(. + 1) }}
-fcx <-
-  tpm %>%
-  filter(rowMeans(across(all_of(fcx_info$name))) > 1) %>%
-  select(gene_id, gene_name) %>%
-  bind_cols(tpm_fcx_norm)
+  tpm <- read_tsv('data/rnaseq-out/star_salmon/salmon.merged.gene_counts.tsv')
+  x <- tpm %>% select(all_of(info$name))
+  groups. <-
+    info %>%
+    `[`(match(colnames(x), .$name), ) %>%
+    pull(treatment) %>%
+    factor()
 
-tpm_hp_norm <-
-  tpm %>%
-  select(gene_id, gene_name, all_of(hp_info$name)) %>%
-  filter(rowMeans(across(all_of(hp_info$name))) > 1) %>%
-  select(all_of(hp_info$name)) %>%
-  as.matrix() %>%
-  normalize.quantiles(keep.names = TRUE) %>%
-  {{ log2(. + 1) }}
-hp <-
-  tpm %>%
-  filter(rowMeans(across(all_of(hp_info$name))) > 1) %>%
-  select(gene_id, gene_name) %>%
-  bind_cols(tpm_hp_norm)
-```
+  dge_counts <- DGEList(counts = x, group = groups.)
+  keep_counts <- filterByExpr(dge_counts)
+  dge_counts <- dge_counts[keep_counts, , keep.lib.sizes = FALSE]
 
-```{r}
-.tpm_ttest <- function(x, info) {
-  if (x[1] != mean(x)) {
-    stat_result <- t.test(
-      x[info$treatment == 'C'],
-      x[info$treatment == 'D'],
-      var.equal = TRUE
-    )
-    stat_result$p.value
-  } else {
-    NA
-  }
+  dge_counts <- calcNormFactors(dge_counts)
+  design <- model.matrix(~ 0 + groups.)
+  dge_counts <- estimateDisp(dge_counts, design)
+
+  fit <- glmFit(dge_counts, design)
+
+  contr <- makeContrasts(
+    dex = (groups.C - groups.D),
+    levels = design
+  )
+
+  results <- glmLRT(fit, contrast = contr)
+  topTags(results, n ='inf')$table %>%
+    as_tibble(rownames = 'row_index') %>%
+    mutate(
+      gene_name = tpm[as.numeric(.$row_index), ]$gene_name
+    ) %>%
+    write_csv(paste0('results/edger/gene-', tiss, '.csv'))
 }
-.tpm_fold <- function(x, info) {
-  mean(x[info$treatment == 'D']) - mean(x[info$treatment == 'C'])
-}
-
-.fcx_p <- apply(select(fcx, all_of(fcx_info$name)), 1, .tpm_ttest, info = fcx_info)
-.hp_p <- apply(select(hp, all_of(hp_info$name)), 1, .tpm_ttest, info = hp_info)
-.fcx_f <- apply(select(fcx, all_of(fcx_info$name)), 1, .tpm_fold, info = fcx_info)
-.hp_f <- apply(select(hp, all_of(hp_info$name)), 1, .tpm_fold, info = hp_info)
-
-fcx %>%
-  mutate(p = .fcx_p, fold = .fcx_f, .after = gene_name) %>%
-  filter(!is.na(p)) %>%
-  mutate(p.adj = p.adjust(p, method = 'fdr'), .after = p) %>%
-  write_csv('results/gene-tpm-FCx.csv')
-hp %>%
-  mutate(p = .hp_p, fold = .hp_f, .after = gene_name) %>%
-  filter(!is.na(p)) %>%
-  mutate(p.adj = p.adjust(p, method = 'fdr'), .after = p) %>%
-  write_csv('results/gene-tpm-Hp.csv')
 ```
