@@ -86,6 +86,7 @@ for (tiss in c('FCx', 'Hp')){
   topTags(results, n ='inf')$table %>%
     as_tibble(rownames = 'row_index') %>%
     mutate(
+      gene_id = gene_counts[as.numeric(.$row_index), ]$gene_id,
       gene_name = gene_counts[as.numeric(.$row_index), ]$gene_name,
       .after = row_index
     ) %>%
