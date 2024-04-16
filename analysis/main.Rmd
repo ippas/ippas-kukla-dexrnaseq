@@ -11,12 +11,21 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
 # https://github.com/Bioconductor/bioconductor_docker/issues/22
 BiocManager::install("preprocessCore", configure.args="--disable-threading")
 BiocManager::install("edgeR")
+
+
+library(devtools)
+devtools::install_github("jokergoo/ComplexHeatmap")
 ```
 
 ```{r load_libraries}
 library(tidyverse)
 library(preprocessCore)
 library(edgeR)
+library(ComplexHeatmap)
+library(scales)
+library(ggpubr)
+library(RColorBrewer)
+library(circlize)
 ```
 
 ```{r read_data}
@@ -40,27 +49,20 @@ sample_info <- tibble(
     'D', 'D', 'D', 'D', 'D', 'D', 'D'
   )
 )
-pass <- function(x) {x}
+
+# remove outlier
+sample_info <-
+  sample_info %>%
+  filter(! name %in% c('FCx_C25', 'FCx_D24', 'Hp_C25'))
 ```
 
-```{r}
+```{r edger}
 gene_counts <- read_tsv('data/rnaseq-out/star_salmon/salmon.merged.gene_counts.tsv')
-.to_remove <- list(
-  'FCx' = c('FCx_C25', 'FCx_D24'),
-  'Hp' = c('Hp_C25')
-)
 
 for (tiss in c('FCx', 'Hp')){
-  sample_info_modified <-
-    sample_info %>%
-    filter(! name %in% .to_remove[[tiss]])
-  suff <- paste0(
-    c('', str_split_i(.to_remove[[tiss]], '_', 2), 'removed'),
-    collapse = '-'
-  )
-
-  tissue_info <- filter(sample_info_modified, tissue == tiss)
+  tissue_info <- filter(sample_info, tissue == tiss)
   x <- gene_counts %>% select(all_of(tissue_info$name))
+
   groups. <-
     tissue_info %>%
     `[`(match(colnames(x), .$name), ) %>%
@@ -91,6 +93,237 @@ for (tiss in c('FCx', 'Hp')){
       .after = row_index
     ) %>%
     select(-row_index) %>%
-    write_csv(paste0('results/edger/gene-', tiss, suff, '.csv'))
+    write_csv(paste0('results/edger/genes-', tiss, '.csv'))
 }
+```
+
+```{r normalize}
+gene_counts <- read_tsv('data/rnaseq-out/star_salmon/salmon.merged.gene_counts.tsv')
+for (tiss in c('FCx', 'Hp')){
+  tiss_info <- filter(sample_info, tissue == tiss)
+  x_normalized_log <-
+    gene_counts %>%
+    select(all_of(tiss_info$name)) %>%
+    as.matrix() %>%
+    normalize.quantiles(keep.names = TRUE) %>%
+    {{ log2(. + 1) }}
+  gene_counts %>%
+    select(gene_id, gene_name) %>%
+    bind_cols(x_normalized_log) %>%
+    write_csv(paste0('results/genes-normalized-log-', tiss, '.csv'))
+}
+```
+
+
+```{r volcano_plots}
+fdr_th = 0.05
+
+for (tiss in c('FCx', 'Hp')) {
+  if (tiss == 'FCx') {
+    plot_data <- read_csv('results/edger/genes-FCx.csv', col_types = 'ccddddd')
+    df <-
+      bind_rows(
+        list(gene_name = 'Slc5a5', xd = -0.2,  yd = 0.15, hj = 1),
+        list(gene_name = 'Bola2', xd = -0.1, yd = 0.4, hj = 1),
+        list(gene_name = 'Slc5a5', xd = -0.2, yd = 0.15, hj = 1),
+        list(gene_name = 'Bola2', xd = -0.1, yd = 0.4, hj = 1),
+        list(gene_name = 'ENSRNOG00000017872', xd = -1, yd = 0.05, hj = 1),
+        list(gene_name = 'Garem2', xd = -0.7, yd = -0.1, hj = 1),
+        list(gene_name = 'Fam111a', xd = -0.3, yd = 0.2, hj = 1),
+        list(gene_name = 'Ca3', xd = -0.2, yd = 0.4, hj = 1),
+        list(gene_name = 'Zfp871', xd = 1, yd = 0.3, hj = 0),
+        list(gene_name = 'Tmem238', xd = 0.3, yd = 1.1, hj = 0),
+        list(gene_name = 'Fam89b', xd = 0.15, yd = 0.5, hj = 0),
+        list(gene_name = 'Lhfpl2', xd = 0.1, yd = 0.05, hj = 0),
+        list(gene_name = 'Rex1bd', xd = 0.25, yd = 1.1, hj = 0),
+        list(gene_name = 'ENSRNOG00000039350', xd = -0.7, yd = -0.1, hj = 1),
+        list(gene_name = 'Cxcl14', xd = -0.1, yd = 0.1, hj = 1)
+      )
+  }
+  else {
+    plot_data <- read_csv('results/edger/genes-Hp.csv', col_types = 'ccddddd')
+    df <-
+      bind_rows(
+        list(gene_name = 'Fos', xd = -0.3, yd = 0.2, hj = 1)
+      )
+  }
+  annots <-
+    plot_data %>%
+    right_join(df) %>%
+    mutate(
+      xend = if_else(! is.na(xd), logFC + xd, logFC),
+      yend = if_else(! is.na(yd), -log10(PValue) + yd, -log10(PValue)),
+      hj = if_else(! is.na(hj), hj, NA)
+    )
+  plot_data <-
+    plot_data %>%
+    mutate(reg = if_else(logFC > 0, 'upregulated', 'downregulated')) %>%
+    mutate(reg_col = if_else(FDR < fdr_th, reg, 'non-significant (FDR < 0.1)'))
+
+  gg <- ggplot(plot_data, aes(x = logFC, y = -log10(PValue))) +
+    geom_segment(
+      aes(x = logFC, y = -log10(PValue), xend = xend, yend = yend),
+      linewidth = 0.2,
+      data = annots
+    ) +
+    geom_point(
+      aes(col = reg_col),
+      alpha = 0.8
+    ) +
+    geom_text(
+      aes(x = xend - 0.1 * (hj - 0.5), y = yend - 0.1, hjust = hj, label = gene_name),
+      vjust = 0,
+      size = 2.7,
+      data = annots
+    ) +
+    labs(x = 'Log2 Fold Change', y = '-Log10 P-value', title = tiss) +
+    scale_x_continuous(limits = c(-4.1, 4.1), breaks = pretty_breaks(n = 10)) +
+    scale_y_continuous(limits = c(0, 6.8)) +
+    scale_color_manual(
+      values = c(
+        'upregulated' = '#E41A1C',
+        'downregulated' = '#377EB8',
+        'non-significant (FDR < 0.1)' = '#808080'
+      )
+    ) +
+    theme_pubr() +
+    theme(legend.title = element_blank())
+  ggsave(
+    paste0('results/edger/volcano-plot-', tiss, '.png'),
+    width = 5,
+    height = 4
+  )
+}
+```
+
+```{r plot_data}
+tiss <- 'FCx'
+fdr_th <- 0.05
+
+kegg_genes <- list(
+  "Ribosome" = c(
+    'Rpl13', 'Rpl18a', 'Rpl32', 'Rpl35', 'Rpl35al1', 'Rpl37', 'Rpl37a', 'Rpl8',
+    'Rplp2', 'Rps10l1', 'Rps15', 'Rps16', 'Rps18', 'Rps21', 'Rps28'
+  )
+  # "Staphylococcus aureus infection" = c(
+  #   'C1qa', 'Fcgr3a', 'Masp1', 'RT1-Bb', 'RT1-Da'
+  # )
+)
+
+fcx <-
+  read_csv('results/edger/genes-FCx.csv', col_types = 'ccddddd') %>%
+  select(gene_id, gene_name, FDR)
+
+tissue_info <- filter(sample_info, tissue == tiss)
+plot_data <-
+  read_csv(
+    paste0('results/genes-normalized-log-', tiss, '.csv'),
+    col_types = 'ccddddddddddddddddddddddddd'
+  ) %>%
+  select(gene_id, gene_name, all_of(tissue_info$name)) %>%
+  left_join(fcx, by = c('gene_id', 'gene_name')) %>%
+  mutate(
+    gene_name = case_match(
+      gene_name,
+      'ENSRNOG00000064545' ~ 'Rpl37',
+      'ENSRNOG00000063418' ~ 'Rpl37a',
+      .default = gene_name
+    )
+  ) %>%
+  filter(FDR < fdr_th)
+plot_info <-
+  sample_info %>%
+  filter(tissue == tiss)
+```
+
+```{r draw_heatmap, echo=FALSE, fig.align="center", fig.width=12, fig.height=10, results='asis', include=TRUE, warning=FALSE}
+.x <-
+  plot_data %>%
+  select(any_of(plot_info$name)) %>%
+  as.matrix() %>%
+  { t(scale(t(.))) }
+rownames(.x) <- plot_data$gene_name
+
+anno_data_right <- transmute(plot_data, gene_name = gene_name)
+for (kegg_name in names(kegg_genes)) {
+  anno_data_right <- mutate(
+      anno_data_right,
+      "{ kegg_name }" := if_else(toupper(gene_name) %in% toupper(kegg_genes[[kegg_name]]), 'sig', 'ns')
+    )
+}
+anno_data_right <- as.data.frame(anno_data_right)
+mark_genes <-
+  plot_data %>%
+  mutate(at = row_number()) %>%
+  filter(gene_name %in% as.character(flatten(kegg_genes)))
+
+.col_fun <- colorRamp2(
+  seq(-2.5, 2.5, length.out = 24),
+  rev(colorRampPalette(brewer.pal(11, "RdBu"))(24))
+)
+.right_annot_col <- list()
+for (kegg_name in names(kegg_genes)) {
+  .right_annot_col[[kegg_name]] <- c('sig'='#CDC693', 'ns'='white')
+}
+
+.top_annotations <- c(
+  columnAnnotation(
+    treatment = as.character(plot_info$treatment),
+    col = list(
+      'treatment' = c('C' = '#CAB2D6', 'D' = '#6A3D9A')
+    ),
+    show_annotation_name = FALSE,
+    show_legend = FALSE
+  )
+)
+
+.right_annotations <- c(
+  rowAnnotation(
+    df = select(anno_data_right, -gene_name),
+    gap = unit(5, 'points'),
+    annotation_name_rot = 90,
+    col = .right_annot_col,
+    show_legend = FALSE
+  ),
+  rowAnnotation(
+    row_names = anno_mark(
+      at = mark_genes$at,
+      labels = mark_genes$gene_name,
+    ),
+    gap = unit(5, 'points'),
+    annotation_name_rot = 45,
+    col = .right_annot_col
+  )
+)
+
+svg('results/edger/heatmap-DEGs-FCx.svg', width = 7, height = 8)
+ht_opt$ROW_ANNO_PADDING = unit(0.2, "cm")
+ht_opt$TITLE_PADDING = unit(0.4, "cm")
+h_cerebellum <- Heatmap(
+  .x,
+  column_title = paste('DEX effect in the frontal cortex (FDR <', format(fdr_th, scientific = FALSE), ')'),
+  cluster_columns = FALSE,
+  clustering_distance_rows = function(x) as.dist(1-cor(t(x))),
+  col = .col_fun,
+  show_row_names = FALSE,
+  show_column_names = FALSE,
+  row_names_side = 'right',
+  row_dend_width = unit(3, 'cm'),
+  row_split = 2,
+  column_names_rot = 45,
+  column_split = rep(1:2, each = 6),
+  top_annotation = .top_annotations,
+  right_annotation = .right_annotations,
+  heatmap_legend_param = list(title = '', at = -3:3, legend_height = unit(3, 'cm')),
+)
+draw(h_cerebellum)
+decorate_annotation("treatment", {
+  grid.text(label = "Control", gp = gpar(col = "black", fontsize = 11))
+}, slice = 1
+)
+decorate_annotation("treatment", {
+  grid.text(label = "DEX", gp = gpar(col = "white", fontsize = 11))
+}, slice = 2
+)
+dev.off()
 ```
